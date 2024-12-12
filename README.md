@@ -1,6 +1,7 @@
-## pg_bulkload-for-polarDB-pg-11
+# pg_bulkload-for-polarDB-pg-11  
 - a version that adapts to polardb-for-pg11
-- restart the serve after copy  
+- restart the polardb after copy  
+- build as followed  
 
 pg_bulkload
 =======
