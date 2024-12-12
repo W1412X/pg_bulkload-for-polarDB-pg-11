@@ -2,7 +2,7 @@
  *
  * pgut-be.h
  *
- * Copyright (c) 2009-2024, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ * Copyright (c) 2009-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
  *
  *-------------------------------------------------------------------------
  */
@@ -74,7 +74,7 @@ extern int no_such_variable
 #define ItemIdIsDead(itemId)		ItemIdDeleted(itemId)
 #define GetCurrentCommandId(used)	GetCurrentCommandId()
 #define stringToQualifiedNameList(str) \
-	stringToQualifiedNameList((str), "pg_bulkload")
+    stringToQualifiedNameList((str), "pg_bulkload")
 #define PageAddItem(page, item, size, offnum, overwrite, is_heap) \
 	PageAddItem((page), (item), (size), (offnum), LP_USED)
 
@@ -182,12 +182,9 @@ extern Datum ExecFetchSlotTupleDatum(TupleTableSlot *slot);
 #define RelationSetNewRelfilenode(rel, xid) \
 	RelationSetNewRelfilenode((rel), (rel->rd_rel->relpersistence), \
 		(xid), (xid))
-#elif PG_VERSION_NUM < 160000
+#elif PG_VERSION_NUM < 130000
 #define RelationSetNewRelfilenode(rel, xid) \
 	RelationSetNewRelfilenode((rel), (rel->rd_rel->relpersistence))
-#else
-#define RelationSetNewRelfilenode(rel, xid) \
-	RelationSetNewRelfilenumber((rel), (rel->rd_rel->relpersistence))
 #endif
 
 #if PG_VERSION_NUM < 80400

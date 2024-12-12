@@ -1,7 +1,7 @@
 /*
  * pg_bulkload: lib/parser_function.c
  *
- *	  Copyright (c) 2009-2024, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ *	  Copyright (c) 2009-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
  */
 
 /**
@@ -321,13 +321,13 @@ FunctionParserInit(FunctionParser *self, Checker *checker, const char *infile, T
 	ReleaseSysCache(ftup);
 
 #if PG_VERSION_NUM >= 120000
-	InitFunctionCallInfoData(*self->fcinfo, &self->flinfo, self->flinfo.fn_nargs,
+	InitFunctionCallInfoData(*self->fcinfo, &self->flinfo, nargs,
 		collation, NULL, (Node *) &self->rsinfo);
 #elif PG_VERSION_NUM >= 90100
-	InitFunctionCallInfoData(self->fcinfo, &self->flinfo, self->flinfo.fn_nargs,
+	InitFunctionCallInfoData(self->fcinfo, &self->flinfo, nargs,
 		collation, NULL, (Node *) &self->rsinfo);
 #else
-	InitFunctionCallInfoData(self->fcinfo, &self->flinfo, self->flinfo.fn_nargs,
+	InitFunctionCallInfoData(self->fcinfo, &self->flinfo, nargs,
 		NULL, (Node *) &self->rsinfo);
 #endif
 

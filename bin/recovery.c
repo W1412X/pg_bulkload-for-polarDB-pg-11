@@ -1,7 +1,7 @@
 /*
  * pg_bulkload: bin/recovery.c
  *
- *	  Copyright (c) 2007-2024, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ *	  Copyright (c) 2007-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
  */
 
 /**
@@ -26,7 +26,11 @@
 #include "catalog/pg_tablespace.h"
 #include "nodes/pg_list.h"
 #include "storage/bufpage.h"
+
+#include "utils/palloc.h"
+
 #include "storage/pg_shmem.h"
+
 
 /**
  * @brief length of ".loadstatus" file
@@ -47,14 +51,7 @@ extern char  *DataDir;
 /* Entry point for the recovery. */
 extern int	LoaderRecoveryMain(void);
 
-
-static void GetSegmentPath(char path[MAXPGPATH], 
-#if PG_VERSION_NUM >= 160000
-												RelFileLocator rLocator, 
-#else
-												RelFileNode rnode, 
-#endif
-												int segno);
+static void GetSegmentPath(char path[MAXPGPATH], RelFileNode rnode, int segno);
 
 /* Determins if the recovery is necessary, and then overwrites data file pages with the vacant one if needed. */
 static void StartLoaderRecovery(void);
@@ -69,13 +66,7 @@ static DBState GetDBClusterState(const char *fname);
 static void GetLoadStatusInfo(const char *lsfpath, LoadStatus * ls);
 
 /* Overwrite data pages with a vacant page. */
-static void ClearLoadedPage(
-#if PG_VERSION_NUM >= 160000
-							RelFileLocator rLocator,
-#else
-							RelFileNode rnode,
-#endif
-
+static void ClearLoadedPage(RelFileNode rnode,
 							BlockNumber blkbeg,
 							BlockNumber blkend);
 
@@ -91,7 +82,7 @@ static void LoaderCreateLockFile(const char *filename,
 								 bool isDDLock, const char *refName);
 
 /* Check that the header fields of a page appear valid. */
-bool PageHeaderIsValid(Page page);
+bool PageHeaderIsValid(PageHeader page);
 
 
 /**
@@ -202,12 +193,7 @@ StartLoaderRecovery(void)
 			/*
 			 * overwrite pages created by the loader by blank pages
 			 */
-			ClearLoadedPage(
-#if PG_VERSION_NUM >= 160000
-							ls.ls.rLocator,
-#else
-							ls.ls.rnode,
-#endif
+			ClearLoadedPage(ls.ls.rnode,
 							ls.ls.exist_cnt,
 							ls.ls.exist_cnt + ls.ls.create_cnt);
 
@@ -274,10 +260,12 @@ GetLSFList(void)
 	 * recovery. Otherwise, we add the name of found LSF into
 	 * the list, then return it.
 	 */
-	if ((dir = opendir(BULKLOAD_LSF_DIR)) == NULL)
+	// if ((dir = opendir(BULKLOAD_LSF_DIR)) == NULL)
+	if ((dir = polar_opendir(BULKLOAD_LSF_DIR)) == NULL)
 		return NIL;
 
-	while ((dp = readdir(dir)) != NULL)
+	// while ((dp = readdir(dir)) != NULL)
+	while ((dp = polar_readdir(dir)) != NULL)
 	{
 		tmp = dp->d_name;
 		filelen = strlen(dp->d_name);
@@ -292,7 +280,8 @@ GetLSFList(void)
 		}
 	}
 
-	if (closedir(dir) == -1)
+	// if (closedir(dir) == -1)
+	if (polar_closedir(dir) == -1)
 		elog(ERROR,
 			 "could not close LSF Directory \"%s\": %s",
 			 BULKLOAD_LSF_DIR, strerror(errno));
@@ -330,19 +319,19 @@ GetDBClusterState(const char *fname)
 	/*
 	 * open, read, and close ControlFileData
 	 */
-	if ((fd = open(fname, O_RDONLY | PG_BINARY, 0)) == -1)
+	if ((fd = polar_open(fname, O_RDONLY | PG_BINARY, 0)) == -1)
 		elog(ERROR,
 			 "could not open control file \"%s\": %s",
 			 fname, strerror(errno));
 
-	if (read(fd, &ControlFile, sizeof(ControlFile)) != sizeof(ControlFile))
+	if (polar_read(fd, &ControlFile, sizeof(ControlFile)) != sizeof(ControlFile))
 		elog(ERROR,
 			 "could not read control file \"%s\": %s",
 			 fname, strerror(errno));
 
 	/* TODO: check CRC of the control file here. */
 
-	if (close(fd) == -1)
+	if (polar_close(fd) == -1)
 		elog(ERROR,
 			 "could not close control file \"%s\": %s",
 			 fname, strerror(errno));
@@ -376,18 +365,18 @@ GetLoadStatusInfo(const char *lsfpath, LoadStatus * ls)
 	/*
 	 * open and read LSF
 	 */
-	if ((fd = open(lsfpath, O_RDONLY | PG_BINARY, 0)) == -1)
+	if ((fd = polar_open(lsfpath, O_RDONLY | PG_BINARY, 0)) == -1)
 		elog(ERROR,
 			 "could not open LoadStatusFile \"%s\": %s",
 			 lsfpath, strerror(errno));
 
-	read_len = read(fd, ls, sizeof(LoadStatus));
+	read_len = polar_read(fd, ls, sizeof(LoadStatus));
 	if (read_len != sizeof(LoadStatus))
 		elog(ERROR,
 			 "could not read LoadStatusFile \"%s\": %s",
 			 lsfpath, strerror(errno));
 
-	if (close(fd) == -1)
+	if (polar_close(fd) == -1)
 		elog(ERROR,
 			 "could not close LoadStatusFile \"%s\": %s",
 			 lsfpath, strerror(errno));
@@ -410,13 +399,7 @@ GetLoadStatusInfo(const char *lsfpath, LoadStatus * ls)
  * @return void
  */
 static void
-ClearLoadedPage(
-#if PG_VERSION_NUM >= 160000
-			RelFileLocator rLocator,
-#else
-			RelFileNode rnode,
-#endif
-			BlockNumber blkbeg, BlockNumber blkend)
+ClearLoadedPage(RelFileNode rnode, BlockNumber blkbeg, BlockNumber blkend)
 {
 	BlockNumber segno;				/* data file segment no */
 	char		segpath[MAXPGPATH];	/* data file name to open */
@@ -447,25 +430,20 @@ ClearLoadedPage(
 	 *	   set	proper extension.
 	 */
 	segno = blkbeg / RELSEG_SIZE;
-	GetSegmentPath(segpath, 
-#if PG_VERSION_NUM >= 160000
-					rLocator, 
-#else
-					rnode,
-#endif
-					segno);
+	GetSegmentPath(segpath, rnode, segno);
 
 	/*
 	 * TODO: consider to use truncate instead of zero-fill to end of file.
 	 */
 
-	fd = open(segpath, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
+	fd = polar_open(segpath, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
 	if (fd == -1)
 		elog(ERROR,
 			 "could not open data file \"%s\": %s",
 			 segpath, strerror(errno));
 
-	seekpos = lseek(fd, (blkbeg % RELSEG_SIZE) * BLCKSZ, SEEK_SET);
+	// seekpos = lseek(fd, (blkbeg % RELSEG_SIZE) * BLCKSZ, SEEK_SET);
+	seekpos = polar_lseek(fd, (blkbeg % RELSEG_SIZE) * BLCKSZ, SEEK_SET);
 
 	if (seekpos == -1)
 		elog(ERROR,
@@ -488,7 +466,7 @@ ClearLoadedPage(
 		 */
 		do
 		{
-			ret = read(fd, page + readlen, BLCKSZ - readlen);
+			ret = polar_read(fd, page + readlen, BLCKSZ - readlen);
 			if (ret == -1)
 			{
 				if (errno == EAGAIN || errno == EINTR)
@@ -516,9 +494,9 @@ ClearLoadedPage(
 		 */
 		if (IsPageCreatedByLoader((Page) page))
 		{
-			seekpos = lseek(fd, (blknum % RELSEG_SIZE) * BLCKSZ, SEEK_SET);
-
-			if (write(fd, zeropage, BLCKSZ) == -1)
+			// seekpos = lseek(fd, (blknum % RELSEG_SIZE) * BLCKSZ, SEEK_SET);
+			seekpos = polar_lseek(fd, (blknum % RELSEG_SIZE) * BLCKSZ, SEEK_SET);
+			if (polar_write(fd, zeropage, BLCKSZ) == -1)
 				elog(ERROR,
 					 "could not write correct empty page : %s",
 					 strerror(errno));
@@ -535,26 +513,20 @@ ClearLoadedPage(
 		 */
 		if (blknum % RELSEG_SIZE == 0)
 		{
-			if (fsync(fd) != 0)
+			if (polar_fsync(fd) != 0)
 				elog(ERROR,
 					 "could not sync data file \"%s\": %s",
 					 segpath, strerror(errno));
 
-			if (close(fd) == -1)
+			if (polar_close(fd) == -1)
 				elog(ERROR,
 					 "could not close data file \"%s\": %s",
 					 segpath, strerror(errno));
 
 			++segno;
-			GetSegmentPath(segpath, 
-#if PG_VERSION_NUM >= 160000
-					rLocator,
-#else
-					rnode,
-#endif
-					segno);
+			GetSegmentPath(segpath, rnode, segno);
 
-			fd = open(segpath, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
+			fd = polar_open(segpath, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
 			if (fd == -1)
 				elog(ERROR,
 					 "could not open data file \"%s\": %s",
@@ -565,12 +537,12 @@ ClearLoadedPage(
 	/*
 	 * post process
 	 */
-	if (fsync(fd) != 0)
+	if (polar_fsync(fd) != 0)
 		elog(ERROR,
 			 "could not sync data file \"%s\": %s",
 			 segpath, strerror(errno));
 
-	if (close(fd) == -1)
+	if (polar_close(fd) == -1)
 		elog(ERROR,
 			 "could not close data file \"%s\": %s",
 			 segpath, strerror(errno));
@@ -593,7 +565,7 @@ IsPageCreatedByLoader(Page page)
 {
 	PageHeader	targetBlock = (PageHeader) page;
 
-	if (!PageHeaderIsValid(page))
+	if (!PageHeaderIsValid(targetBlock))
 		return true;
 
 	if (targetBlock->pd_lsn.xlogid == 0 && targetBlock->pd_lsn.xrecoff == 0)
@@ -659,7 +631,7 @@ LoaderUnlinkLockFile(const char *fname)
 {
 	if (fname != NULL)
 	{
-		if (unlink(fname) != 0)
+		if (polar_unlink(fname) != 0)
 		{
 			/*
 			 * Should we complain if the unlink fails?
@@ -710,7 +682,7 @@ LoaderCreateLockFile(const char *filename, bool amPostmaster,
 		 * Think not to make the file protection weaker than 0600.	See
 		 * comments below.
 		 */
-		fd = open(filename, O_RDWR | O_CREAT | O_EXCL | PG_BINARY, 0600);
+		fd = polar_open(filename, O_RDWR | O_CREAT | O_EXCL | PG_BINARY, 0600);
 		if (fd >= 0)
 			break;				/* Success; exit the retry loop */
 
@@ -726,7 +698,7 @@ LoaderCreateLockFile(const char *filename, bool amPostmaster,
 		 * Read the file to get the old owner's PID.  Note race condition
 		 * here: file might have been deleted since we tried to create it.
 		 */
-		fd = open(filename, O_RDONLY | PG_BINARY, 0600);
+		fd = polar_open(filename, O_RDONLY | PG_BINARY, 0600);
 		if (fd < 0)
 		{
 			if (errno == ENOENT)
@@ -735,11 +707,11 @@ LoaderCreateLockFile(const char *filename, bool amPostmaster,
 				 "could not open lock file \"%s\": %s",
 				 filename, strerror(errno));
 		}
-		if ((len = read(fd, buffer, sizeof(buffer) - 1)) < 0)
+		if ((len = polar_read(fd, buffer, sizeof(buffer) - 1)) < 0)
 			elog(FATAL,
 				 "could not read lock file \"%s\": %s",
 				 filename, strerror(errno));
-		close(fd);
+		polar_close(fd);
 
 		buffer[len] = '\0';
 		encoded_pid = atoi(buffer);
@@ -841,7 +813,7 @@ LoaderCreateLockFile(const char *filename, bool amPostmaster,
 		 * it.	Need a loop because of possible race condition against other
 		 * would-be creators.
 		 */
-		if (unlink(filename) < 0)
+		if (polar_unlink(filename) < 0)
 			elog(FATAL,
 				 "could not remove old lock file \"%s\": %s "
 				 "The file seems accidentally left over, but "
@@ -856,12 +828,12 @@ LoaderCreateLockFile(const char *filename, bool amPostmaster,
 	snprintf(buffer, sizeof(buffer), "%d\n%s\n",
 			 amPostmaster ? (int) my_pid : -((int) my_pid), DataDir);
 	errno = 0;
-	if (write(fd, buffer, strlen(buffer)) != strlen(buffer))
+	if (polar_write(fd, buffer, strlen(buffer)) != strlen(buffer))
 	{
 		int			save_errno = errno;
 
-		close(fd);
-		unlink(filename);
+		polar_close(fd);
+		polar_unlink(filename);
 		/*
 		 * if write didn't set errno, assume problem is no disk space 
 		 */
@@ -870,11 +842,11 @@ LoaderCreateLockFile(const char *filename, bool amPostmaster,
 			 "could not write lock file \"%s\": %s",
 			 filename, strerror(errno));
 	}
-	if (close(fd))
+	if (polar_close(fd))
 	{
 		int			save_errno = errno;
 
-		unlink(filename);
+		polar_unlink(filename);
 		errno = save_errno;
 		elog(FATAL,
 			 "could not write lock file \"%s\": %s",
@@ -945,34 +917,28 @@ PageInit(Page page, Size pageSize, Size specialSize)
  * treat such a page as empty and without free space.  Eventually, VACUUM
  * will clean up such a page and make it usable.
  */
-
 bool
-PageHeaderIsValid(Page page)
+PageHeaderIsValid(PageHeader page)
 {
 	char	   *pagebytes;
 	int			i;
-	PageHeader phdr = (PageHeader) page;
+
 	/*
 	 * Check normal case
 	 */
-	if (PageGetPageSize(
-#if PG_VERSION_NUM >= 160000
-		page) == BLCKSZ && PageGetPageLayoutVersion(page
-#else
-		phdr) == BLCKSZ && PageGetPageLayoutVersion(phdr
-#endif
-	 	) == PG_PAGE_LAYOUT_VERSION &&
-		phdr->pd_lower >= SizeOfPageHeaderData &&
-		phdr->pd_lower <= phdr->pd_upper &&
-		phdr->pd_upper <= phdr->pd_special &&
-		phdr->pd_special <= BLCKSZ &&
-		phdr->pd_special == MAXALIGN(phdr->pd_special))
+	if (PageGetPageSize(page) == BLCKSZ &&
+		PageGetPageLayoutVersion(page) == PG_PAGE_LAYOUT_VERSION &&
+		page->pd_lower >= SizeOfPageHeaderData &&
+		page->pd_lower <= page->pd_upper &&
+		page->pd_upper <= page->pd_special &&
+		page->pd_special <= BLCKSZ &&
+		page->pd_special == MAXALIGN(page->pd_special))
 		return true;
 
 	/*
 	 * Check all-zeroes case
 	 */
-	pagebytes = (char *) phdr;
+	pagebytes = (char *) page;
 	for (i = 0; i < BLCKSZ; i++)
 	{
 		if (pagebytes[i] != 0)
@@ -982,49 +948,24 @@ PageHeaderIsValid(Page page)
 }
 
 static void
-GetSegmentPath(char path[MAXPGPATH], 
-#if PG_VERSION_NUM >= 160000
-		RelFileLocator rLocator, 
-#else
-		RelFileNode rnode, 
-#endif
-		int segno)
+GetSegmentPath(char path[MAXPGPATH], RelFileNode rnode, int segno)
 {
-#if PG_VERSION_NUM >= 160000
-	if (rLocator.spcOid == GLOBALTABLESPACE_OID)
-#else
 	if (rnode.spcNode == GLOBALTABLESPACE_OID)
-#endif
 	{
 		/* Shared system relations live in {datadir}/global */
-#if PG_VERSION_NUM >= 160000
-		snprintf(path, MAXPGPATH, "global/%u", rLocator.relNumber);
-#else
 		snprintf(path, MAXPGPATH, "global/%u", rnode.relNode);
-#endif
 	}
-#if PG_VERSION_NUM >= 160000
-	else if (rLocator.spcOid == DEFAULTTABLESPACE_OID)
-#else
 	else if (rnode.spcNode == DEFAULTTABLESPACE_OID)
-#endif		
-
 	{
 		/* The default tablespace is {datadir}/base */
-#if PG_VERSION_NUM >= 160000
-		snprintf(path, MAXPGPATH, "base/%u/%u", rLocator.dbOid, rLocator.relNumber);
-#else
-		snprintf(path, MAXPGPATH, "base/%u/%u", rnode.dbNode, rnode.relNode);
-#endif				
+		snprintf(path, MAXPGPATH, "base/%u/%u",
+					 rnode.dbNode, rnode.relNode);
 	}
 	else
 	{
 		/* All other tablespaces are accessed via symlinks */
-#if PG_VERSION_NUM >= 160000
-		snprintf(path, MAXPGPATH, "pg_tblspc/%u/%u/%u", rLocator.spcOid, rLocator.dbOid, rLocator.relNumber);
-#else
-		snprintf(path, MAXPGPATH, "pg_tblspc/%u/%u/%u", rnode.spcNode, rnode.dbNode, rnode.relNode);
-#endif			
+		snprintf(path, MAXPGPATH, "pg_tblspc/%u/%u/%u",
+					 rnode.spcNode, rnode.dbNode, rnode.relNode);
 	}
 
 	if (segno > 0)
@@ -1112,7 +1053,9 @@ PGSharedMemoryIsInUse(unsigned long id1, unsigned long id2)
 	 * have useful inode numbers, we can't do this so we punt and assume there
 	 * is a conflict.
 	 */
-	if (stat(DataDir, &statbuf) < 0)
+
+	// if (stat(DataDir, &statbuf) < 0)
+	if (polar_stat(DataDir, &statbuf) < 0)
 		return true;			/* if can't stat, be conservative */
 
 	hdr = (PGShmemHeader *) shmat(shmId, NULL, PG_SHMAT_FLAGS);

@@ -1,7 +1,7 @@
 /*
  * pg_bulkload: lib/pg_btree.c
  *
- *	  Copyright (c) 2007-2024, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ *	  Copyright (c) 2007-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
  */
 
 /**
@@ -41,16 +41,8 @@
 
 #include "logger.h"
 
-#if PG_VERSION_NUM >= 170000
+#if PG_VERSION_NUM >= 130000
 #error unsupported PostgreSQL version
-#elif PG_VERSION_NUM >= 160000
-#include "nbtree/nbtsort-16.c"
-#elif PG_VERSION_NUM >= 150000
-#include "nbtree/nbtsort-15.c"
-#elif PG_VERSION_NUM >= 140000
-#include "nbtree/nbtsort-14.c"
-#elif PG_VERSION_NUM >= 130000
-#include "nbtree/nbtsort-13.c"
 #elif PG_VERSION_NUM >= 120000
 #include "nbtree/nbtsort-12.c"
 #elif PG_VERSION_NUM >= 110000
@@ -79,10 +71,6 @@
 #error unsupported PostgreSQL version
 #endif
 
-#if PG_VERSION_NUM >= 140000
-#include "nbtree/nbtsort-common.c"
-#endif
-
 #include "pg_btree.h"
 #include "pg_profile.h"
 #include "pgut/pgut-be.h"
@@ -103,9 +91,8 @@ typedef struct BTReader
 
 static BTSpool **IndexSpoolBegin(ResultRelInfo *relinfo, bool enforceUnique);
 static void IndexSpoolEnd(Spooler *self);
-static void IndexSpoolInsert(BTSpool **spools, TupleTableSlot *slot,
-							 ItemPointer tupleid, EState *estate,
-							 ResultRelInfo *relinfo);
+static void IndexSpoolInsert(BTSpool **spools, TupleTableSlot *slot, ItemPointer tupleid, EState *estate);
+
 static IndexTuple BTSpoolGetNextItem(BTSpool *spool, IndexTuple itup, bool *should_free);
 static int BTReaderInit(BTReader *reader, Relation rel);
 static void BTReaderTerm(BTReader *reader);
@@ -152,14 +139,9 @@ SpoolerOpen(Spooler *self,
 #endif
 
 	self->estate = CreateExecutorState();
-#if PG_VERSION_NUM >= 140000
-	self->estate->es_opened_result_relations =
-		lappend(self->estate->es_opened_result_relations, self->relinfo);
-#else
 	self->estate->es_num_result_relations = 1;
 	self->estate->es_result_relations = self->relinfo;
 	self->estate->es_result_relation_info = self->relinfo;
-#endif
 
 #if PG_VERSION_NUM >= 120000
 	self->slot = MakeSingleTupleTableSlot(RelationGetDescr(rel), &TTSOpsHeapTuple);
@@ -180,13 +162,8 @@ SpoolerClose(Spooler *self)
 
 	/* Terminate spooler. */
 	ExecDropSingleTupleTableSlot(self->slot);
-#if PG_VERSION_NUM >= 140000
-	if (self->relinfo)
-		ExecCloseResultRelations(self->estate);
-#else
 	if (self->estate->es_result_relation_info)
 		ExecCloseIndices(self->estate->es_result_relation_info);
-#endif
 	FreeExecutorState(self->estate);
 
 	/* Close and release members. */
@@ -202,23 +179,13 @@ SpoolerClose(Spooler *self)
 void
 SpoolerInsert(Spooler *self, HeapTuple tuple)
 {
-	ResultRelInfo *relinfo;
-
 	/* Spool keys in the tuple */
 #if PG_VERSION_NUM >= 120000
 	ExecStoreHeapTuple(tuple, self->slot, false);
 #else
 	ExecStoreTuple(tuple, self->slot, InvalidBuffer, false);
 #endif
-
-#if PG_VERSION_NUM >= 140000
-	relinfo = self->relinfo;
-#else
-	relinfo = self->estate->es_result_relation_info;
-#endif
-	IndexSpoolInsert(self->spools, self->slot,
-					 &(tuple->t_self), self->estate,
-					 relinfo);
+	IndexSpoolInsert(self->spools, self->slot, &(tuple->t_self), self->estate);
 	BULKLOAD_PROFILE(&prof_writer_index);
 }
 
@@ -249,9 +216,6 @@ IndexSpoolBegin(ResultRelInfo *relinfo, bool enforceUnique)
 #if PG_VERSION_NUM >= 90300
 			spools[i] = _bt_spoolinit(heapRel,indices[i],
 					enforceUnique ? indices[i]->rd_index->indisunique: false,
-#if PG_VERSION_NUM >= 150000
-					indices[i]->rd_index->indnullsnotdistinct, 
-#endif
 					false);
 #else
 			spools[i] = _bt_spoolinit(indices[i],
@@ -294,20 +258,13 @@ IndexSpoolEnd(Spooler *self)
 		{
 			Oid		indexOid = RelationGetRelid(indices[i]);
 
-#if PG_VERSION_NUM >= 140000
-			ReindexParams params = {0};
-#endif
-
 			/* Close index before reindex to pass CheckTableNotInUse. */
 			relation_close(indices[i], NoLock);
 #if PG_VERSION_NUM >= 90500
 			persistence = indices[i]->rd_rel->relpersistence;
 #endif
 			indices[i] = NULL;
-
-#if PG_VERSION_NUM >= 140000
-			reindex_index(indexOid, false, persistence, &params);
-#elif PG_VERSION_NUM >= 90500
+#if PG_VERSION_NUM >= 90500
 			reindex_index(indexOid, false, persistence, 0);
 #else
 			reindex_index(indexOid, false);
@@ -326,10 +283,9 @@ IndexSpoolEnd(Spooler *self)
  *	Copied from ExecInsertIndexTuples.
  */
 static void
-IndexSpoolInsert(BTSpool **spools, TupleTableSlot *slot,
-				ItemPointer tupleid, EState *estate,
-				ResultRelInfo *relinfo)
+IndexSpoolInsert(BTSpool **spools, TupleTableSlot *slot, ItemPointer tupleid, EState *estate)
 {
+	ResultRelInfo  *relinfo;
 	int				i;
 	int				numIndices;
 	RelationPtr		indices;
@@ -339,6 +295,7 @@ IndexSpoolInsert(BTSpool **spools, TupleTableSlot *slot,
 	/*
 	 * Get information from the result relation relinfo structure.
 	 */
+	relinfo = estate->es_result_relation_info;
 	numIndices = relinfo->ri_NumIndices;
 	indices = relinfo->ri_IndexRelationDescs;
 	indexInfoArray = relinfo->ri_IndexRelationInfo;
@@ -531,7 +488,6 @@ _bt_mergeload(Spooler *self, BTWriteState *wstate, BTSpool *btspool, BTReader *b
 	/* the preparation of merge */
 	itup = BTSpoolGetNextItem(btspool, NULL, &should_free);
 	itup2 = BTReaderGetNextItem(btspool2);
-
 #if PG_VERSION_NUM >= 120000
 	btIndexScanKey = _bt_mkscankey(wstate->index, NULL);
 	indexScanKey = btIndexScanKey->scankeys;
@@ -560,13 +516,7 @@ _bt_mergeload(Spooler *self, BTWriteState *wstate, BTSpool *btspool, BTReader *b
 			compare = compare_indextuple(itup, itup2, indexScanKey,
 										 keysz, tupdes, &hasnull);
 
-			if (compare == 0 && 
-#if PG_VERSION_NUM >= 150000
-			(!hasnull || btspool->nulls_not_distinct)
-#else
-			!hasnull 
-#endif		
-			&& btspool->isunique)
+			if (compare == 0 && !hasnull && btspool->isunique)
 			{
 				ItemPointerData t_tid2;
 
@@ -642,13 +592,7 @@ _bt_mergeload(Spooler *self, BTWriteState *wstate, BTSpool *btspool, BTReader *b
 
 				compare = compare_indextuple(itup, next_itup, indexScanKey,
 											 keysz, tupdes, &hasnull);
-				if (compare < 0 || 
-#if PG_VERSION_NUM >= 150000
-				(hasnull && !btspool->nulls_not_distinct)
-#else
-				hasnull
-#endif		
-				)
+				if (compare < 0 || hasnull)
 					break;
 
 				if (compare > 0)
@@ -687,11 +631,7 @@ _bt_mergeload(Spooler *self, BTWriteState *wstate, BTSpool *btspool, BTReader *b
 							 errmsg("Maximum duplicate error count exceeded")));
 			}
 
-#if PG_VERSION_NUM >= 130000
-			_bt_buildadd(wstate, state, itup, 0);
-#else
 			_bt_buildadd(wstate, state, itup);
-#endif
 
 			if (should_free)
 				pfree(itup);
@@ -701,11 +641,7 @@ _bt_mergeload(Spooler *self, BTWriteState *wstate, BTSpool *btspool, BTReader *b
 		}
 		else
 		{
-#if PG_VERSION_NUM >= 130000
-			_bt_buildadd(wstate, state, itup2, 0);
-#else
 			_bt_buildadd(wstate, state, itup2);
-#endif
 			itup2 = BTReaderGetNextItem(btspool2);
 		}
 		BULKLOAD_PROFILE(&prof_merge_insert);
@@ -738,11 +674,7 @@ _bt_mergeload(Spooler *self, BTWriteState *wstate, BTSpool *btspool, BTReader *b
 #if PG_VERSION_NUM >= 90100
 	if (!RELATION_IS_LOCAL(wstate->index)&& !(wstate->index->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED))
 	{
-#if PG_VERSION_NUM >= 150000
-		RelationGetSmgr(wstate->index);
-#else
 		RelationOpenSmgr(wstate->index);
-#endif
 		smgrimmedsync(wstate->index->rd_smgr, MAIN_FORKNUM);
 	}
 #else
@@ -803,10 +735,7 @@ BTReaderInit(BTReader *reader, Relation rel)
 	 * smgropen *after* RelationSetNewRelfilenode.
 	 */
 	memset(&reader->smgr, 0, sizeof(reader->smgr));
-#if PG_VERSION_NUM >= 160000
-	reader->smgr.smgr_rlocator.locator = rel->rd_locator;
-	reader->smgr.smgr_rlocator.backend = rel->rd_backend == MyBackendId ? MyBackendId : InvalidBackendId;
-#elif PG_VERSION_NUM >= 90100
+#if PG_VERSION_NUM >= 90100
 	reader->smgr.smgr_rnode.node = rel->rd_node;
 	reader->smgr.smgr_rnode.backend =
 		rel->rd_backend == MyBackendId ? MyBackendId : InvalidBackendId;
@@ -817,12 +746,7 @@ BTReaderInit(BTReader *reader, Relation rel)
 
 	reader->blkno = InvalidBlockNumber;
 	reader->offnum = InvalidOffsetNumber;
-
-#if PG_VERSION_NUM >= 160000
-	reader->page = (Page) palloc_aligned(BLCKSZ, PG_IO_ALIGN_SIZE, 0);
-#else
 	reader->page = palloc(BLCKSZ);
-#endif
 
 	/*
 	 * Read meta page and check sanity of it.
@@ -872,13 +796,14 @@ BTReaderInit(BTReader *reader, Relation rel)
 		firstid = PageGetItemId(reader->page, P_FIRSTDATAKEY(opaque));
 		itup = (IndexTuple) PageGetItem(reader->page, firstid);
 
-#if PG_VERSION_NUM >= 130000
-		blkno = BTreeTupleGetDownLink(itup);
-#elif PG_VERSION_NUM >= 110000
-		blkno = BTreeInnerTupleGetDownLink(itup);
-#else
+		if ((itup->t_tid).ip_posid == 0)
+		{
+			elog(DEBUG1, "pg_bulkload: failded in BTReaderInit for \"%s\"",
+				RelationGetRelationName(rel));
+			return -1;
+		}
+
 		blkno = ItemPointerGetBlockNumber(&(itup->t_tid));
-#endif
 
 		/* Go down to children */
 		for (;;)

@@ -2,7 +2,7 @@
  *
  * pgut-fe.c
  *
- * Copyright (c) 2009-2024, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ * Copyright (c) 2009-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
  *
  *-------------------------------------------------------------------------
  */
@@ -14,11 +14,6 @@
 #include <getopt.h>
 #else
 #include <getopt_long.h>
-#endif
-
-
-#if PG_VERSION_NUM >= 150000
-#include <pwd.h>
 #endif
 
 char	   *dbname = NULL;
@@ -603,7 +598,7 @@ option_merge(const pgut_option opts1[], const pgut_option opts2[])
 	result = pgut_newarray(struct option, n + 1);
 	option_copy(result, opts1, len1);
 	option_copy(result + len1, opts2, len2);
-	memset(&result[n], 0, sizeof(struct option));
+	memset(&result[n], 0, sizeof(pgut_option));
 
 	return result;
 }

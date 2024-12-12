@@ -1,7 +1,7 @@
 /*
  * pg_bulkload: include/writer.h
  *
- *	  Copyright (c) 2009-2024, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ *	  Copyright (c) 2009-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
  */
 
 /**
@@ -22,11 +22,7 @@
 
 #include "reader.h"
 
-#if PG_VERSION_NUM >= 130000
-#define MAXINT8LEN		20
-#else
 #define MAXINT8LEN		25
-#endif
 
 #define DEFAULT_MAX_DUP_ERRORS	0
 
@@ -41,7 +37,7 @@ typedef struct WriterResult
 } WriterResult;
 
 typedef void (*WriterInitProc)(Writer *self);
-typedef void (*WriterInsertProc)(Writer *self, HeapTuple tuple);
+typedef bool (*WriterInsertProc)(Writer *self, HeapTuple tuple);
 typedef WriterResult (*WriterCloseProc)(Writer *self, bool onError);
 typedef bool (*WriterParamProc)(Writer *self, const char *keyword, char *value);
 typedef void (*WriterDumpParamsProc)(Writer *self);

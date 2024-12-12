@@ -1,7 +1,7 @@
 /*
  * pg_bulkload: lib/reader.c
  *
- *	  Copyright (c) 2007-2024, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ *	  Copyright (c) 2007-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
  */
 
 /**
@@ -368,11 +368,7 @@ void
 CheckerInit(Checker *checker, Relation rel, TupleChecker *tchecker)
 {
 	TupleDesc       desc;
-#if PG_VERSION_NUM >= 160000
-	RTEPermissionInfo   *rtep;
-	List	   		*perminfos = NIL;
-#endif
-	RangeTblEntry	*rte;
+	RangeTblEntry   *rte;
 	List            *range_table = NIL;
 #if PG_VERSION_NUM >= 80400
 	TupleDesc       tupDesc;
@@ -415,35 +411,18 @@ CheckerInit(Checker *checker, Relation rel, TupleChecker *tchecker)
 	if (checker->has_constraints)
 	{
 		checker->estate = CreateExecutorState();
-#if PG_VERSION_NUM >= 140000
-		checker->estate->es_opened_result_relations =
-			lappend(checker->estate->es_opened_result_relations, checker->resultRelInfo);
-#else
 		checker->estate->es_result_relations = checker->resultRelInfo;
 		checker->estate->es_num_result_relations = 1;
 		checker->estate->es_result_relation_info = checker->resultRelInfo;
-#endif
 
         /* Set up RangeTblEntry */
         rte = makeNode(RangeTblEntry);
         rte->rtekind = RTE_RELATION;
         rte->relid = RelationGetRelid(rel);
-#if PG_VERSION_NUM >= 160000
-        rtep = makeNode(RTEPermissionInfo);
-        rtep->relid = rte->relid;
-        rtep->inh = rte->inh;
-        perminfos = lappend(perminfos, rtep);
-        rte->perminfoindex = list_length(perminfos);
-#endif
-
 #if PG_VERSION_NUM >= 90100
         rte->relkind = rel->rd_rel->relkind;
 #endif
-#if PG_VERSION_NUM >= 160000
-		rtep->requiredPerms = ACL_INSERT;
-#else
         rte->requiredPerms = ACL_INSERT;
-#endif
         range_table = list_make1(rte);
 
 #if PG_VERSION_NUM >= 80400
@@ -451,9 +430,7 @@ CheckerInit(Checker *checker, Relation rel, TupleChecker *tchecker)
         attnums = tupDesc->natts;
         for(i = 0; i <= attnums; i++) 
         {
-#if PG_VERSION_NUM >= 160000
-			rtep->insertedCols = bms_add_member(rtep->insertedCols, i);
-#elif PG_VERSION_NUM >= 90500
+#if PG_VERSION_NUM >= 90500
 			rte->insertedCols = bms_add_member(rte->insertedCols, i);
 #else
 			rte->modifiedCols = bms_add_member(rte->modifiedCols, i);
@@ -461,42 +438,34 @@ CheckerInit(Checker *checker, Relation rel, TupleChecker *tchecker)
         }
 #endif
 
-#if PG_VERSION_NUM >= 160000
-		ExecCheckPermissions(range_table, perminfos, true);
-#elif PG_VERSION_NUM >= 90100
+#if PG_VERSION_NUM >= 90100
         /* This API is published only from 9.1. 
          * This is used for permission check, but currently pg_bulkload
          * is called only from super user and so the below code maybe
          * is not essential. */
         ExecCheckRTPerms(range_table, true);
 #endif
-	
-#if PG_VERSION_NUM >= 160000
-		ExecInitRangeTable(checker->estate, range_table, perminfos);
-#elif PG_VERSION_NUM >= 120000
-		/* Some APIs have changed significantly as of v12. */
-		ExecInitRangeTable(checker->estate, range_table);
-#else
-		checker->estate->es_range_table = range_table;
-#endif
 
+		/* Some APIs have changed significantly as of v12. */
 #if PG_VERSION_NUM >= 120000
+		ExecInitRangeTable(checker->estate, range_table);
 		checker->slot = MakeSingleTupleTableSlot(desc, &TTSOpsHeapTuple);
 #else
+		checker->estate->es_range_table = range_table;
 		checker->slot = MakeSingleTupleTableSlot(desc);
 #endif
 	}
 
 	if (!checker->has_constraints && checker->has_not_null)
 	{
-		int	n;
+		int	i;
 
 		checker->desc = CreateTupleDescCopy(desc);
-		for (n = 0; n < desc->natts; n++)
+		for (i = 0; i < desc->natts; i++)
 #if PG_VERSION_NUM >= 110000
-			checker->desc->attrs[n].attnotnull = desc->attrs[n].attnotnull;
+			checker->desc->attrs[i].attnotnull = desc->attrs[i].attnotnull;
 #else
-			checker->desc->attrs[n]->attnotnull = desc->attrs[n]->attnotnull;
+			checker->desc->attrs[i]->attnotnull = desc->attrs[i]->attnotnull;
 #endif
 	}
 }

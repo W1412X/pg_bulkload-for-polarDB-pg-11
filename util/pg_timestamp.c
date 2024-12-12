@@ -1,7 +1,7 @@
 /*
  * pg_bulkload: util/pg_timestamp.c
  *
- *	  Copyright (c) 2007-2024, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ *	  Copyright (c) 2007-2011, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
  */
 #include "postgres.h"
 
@@ -14,9 +14,7 @@
 PG_MODULE_MAGIC;
 
 /* prototype of static function */
-#if PG_VERSION_NUM < 130000
 static void AdjustTimestampForTypmod(Timestamp *time, int32 typmod);
-#endif
 extern Datum pg_timestamp_in(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(pg_timestamp_in);
@@ -204,11 +202,7 @@ pg_timestamp_in(PG_FUNCTION_ARGS)
 	/*
 	 * Adjust the value
 	 */
-#if PG_VERSION_NUM >= 160000
-	AdjustTimestampForTypmod(&result, typmod, NULL);
-#else
 	AdjustTimestampForTypmod(&result, typmod);
-#endif
 
 	/*
 	 * Return the result value
@@ -216,7 +210,6 @@ pg_timestamp_in(PG_FUNCTION_ARGS)
 	PG_RETURN_TIMESTAMP(result);
 }
 
-#if PG_VERSION_NUM < 130000
 /*------------------------------------------------------------------------
  *	 The following lines were taken from the original PostgreSQL source.
  *	   - AdjustTimestampForTypmod		No modification is made here.
@@ -301,4 +294,3 @@ AdjustTimestampForTypmod(Timestamp *time, int32 typmod)
 #endif
 	}
 }
-#endif

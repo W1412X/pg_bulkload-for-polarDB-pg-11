@@ -2,15 +2,12 @@
  *
  * pgut.c
  *
- * Copyright (c) 2009-2024, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ * Copyright (c) 2009-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
  *
  *-------------------------------------------------------------------------
  */
 
 #include "postgres_fe.h"
-#if PG_VERSION_NUM >= 140000
-#include "common/string.h"
-#endif
 #include "libpq/pqsignal.h"
 
 #include <limits.h>
@@ -348,7 +345,7 @@ parse_time(const char *value, time_t *time)
 	char		junk[2];
 
 	/* tmp = replace( value, !isalnum, ' ' ) */
-	tmp = pgut_malloc(strlen(value) + 1);
+	tmp = pgut_malloc(strlen(value) + + 1);
 	len = 0;
 	for (i = 0; value[i]; i++)
 		tmp[len++] = (IsAlnum(value[i]) ? value[i] : ' ');
@@ -390,11 +387,7 @@ parse_time(const char *value, time_t *time)
 
 static char *
 prompt_for_password(void)
-#if PG_VERSION_NUM >= 140000
-{
-	return simple_prompt("Password: ", false);
-}
-#elif PG_VERSION_NUM >= 100000
+#if PG_VERSION_NUM >= 100000
 {
 	char	buf[100];
 
@@ -844,7 +837,7 @@ elog(int elevel, const char *fmt, ...)
 	do
 	{
 		va_start(args, fmt);
-		ok = appendStringInfoVA_c(&edata->msg, fmt, args);
+		ok = appendStringInfoVA(&edata->msg, fmt, args);
 		va_end(args);
 	} while (!ok);
 	len = strlen(fmt);
@@ -1009,7 +1002,7 @@ errmsg(const char *fmt,...)
 	do
 	{
 		va_start(args, fmt);
-		ok = appendStringInfoVA_c(&edata->msg, fmt, args);
+		ok = appendStringInfoVA(&edata->msg, fmt, args);
 		va_end(args);
 	} while (!ok);
 	len = strlen(fmt);
@@ -1030,7 +1023,7 @@ errdetail(const char *fmt,...)
 	do
 	{
 		va_start(args, fmt);
-		ok = appendStringInfoVA_c(&edata->detail, fmt, args);
+		ok = appendStringInfoVA(&edata->detail, fmt, args);
 		va_end(args);
 	} while (!ok);
 	trimStringBuffer(&edata->detail);
@@ -1216,7 +1209,7 @@ exit_or_abort(int exitcode)
  * unlike the server code, this function automatically extend the buffer.
  */
 bool
-appendStringInfoVA_c(StringInfo str, const char *fmt, va_list args)
+appendStringInfoVA(StringInfo str, const char *fmt, va_list args)
 {
 	size_t		avail;
 	int			nprinted;
@@ -1278,7 +1271,7 @@ appendStringInfoFd(StringInfo str, int fd)
 		if (str->maxlen - str->len < 2 && enlargeStringInfo(str, 1024) == 0)
 			return errno = ENOMEM;
 
-		rc = read(fd, str->data + str->len, str->maxlen - str->len - 1);
+		rc = polar_read(fd, str->data + str->len, str->maxlen - str->len - 1);
 		if (rc == 0)
 			break;
 		else if (rc > 0)
@@ -1470,7 +1463,8 @@ pgut_mkdir(const char *dirpath)
 
 retry:
 		/* check for pre-existing directory; ok if it's a parent */
-		if (stat(path, &sb) == 0)
+		// if (stat(path, &sb) == 0)
+		if (polar_stat(path, &sb) == 0)
 		{
 			if (!S_ISDIR(sb.st_mode))
 			{
@@ -1482,7 +1476,7 @@ retry:
 				break;
 			}
 		}
-		else if (mkdir(path, S_IRWXU) < 0)
+		else if (polar_mkdir(path, S_IRWXU) < 0)
 		{
 			if (errno == EEXIST)
 				goto retry;	/* another thread might create the directory. */

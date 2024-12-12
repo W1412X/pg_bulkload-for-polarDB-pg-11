@@ -1,3 +1,7 @@
+## pg_bulkload-for-polarDB-pg-11
+- a version that adapts to polardb-for-pg11
+- restart the serve after copy  
+
 pg_bulkload
 =======
 pg_bulkload is a high speed data loading tool for PostgreSQL.
@@ -10,7 +14,8 @@ pg_bulkload also has some ETL features; input data validation and data transform
 Branches
 --------
 
-* master: branch for pg_bulkload 3.2 [![Test](https://github.com/ossc-db/pg_bulkload/actions/workflows/test.yml/badge.svg?branch=master&event=push)](https://github.com/ossc-db/pg_bulkload/actions/workflows/test.yml)
+* master : branch for pg_bulkload 3.1  [![Build Status](https://travis-ci.org/ossc-db/pg_bulkload.svg?branch=master)](https://travis-ci.org/ossc-db/pg_bulkload)
+* VERSION3_2_DEV : branch for pg_bulkload 3.2  [![Build Status](https://travis-ci.org/ossc-db/pg_bulkload.svg?branch=VERSION3_2_DEV)](https://travis-ci.org/ossc-db/pg_bulkload)
 
 How to use
 ----------
@@ -33,7 +38,7 @@ http://ossc-db.github.io/pg_bulkload/index.html
 
 How to build and install from source code
 -----------------------------------------
-Change directory into top directory of pg_bulkload source codes and
+Change directory into top directory of pg_bulkload sorce codes and
 run the below commands.
 
 ````

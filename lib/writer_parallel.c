@@ -1,7 +1,7 @@
 /*
  * pg_bulkload: lib/writer_parallel.c
  *
- *	  Copyright (c) 2009-2024, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ *	  Copyright (c) 2009-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
  */
 
 #include "postgres.h"
@@ -11,11 +11,7 @@
 #include "access/heapam.h"
 #include "access/xact.h"
 #include "commands/dbcommands.h"
-#if PG_VERSION_NUM >= 160000
-#include "utils/guc_hooks.h"
-#else
 #include "commands/variable.h"
-#endif
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
 #include "postmaster/postmaster.h"
@@ -96,11 +92,7 @@ ParallelWriterInit(ParallelWriter *self)
 		TupleDesc	resultDesc;
 
 		/* open relation to get the TupleDesc */
-#if PG_VERSION_NUM >= 130000
-		self->base.rel = rel = table_open(self->base.relid, AccessShareLock);
-#else
 		self->base.rel = rel = heap_open(self->base.relid, AccessShareLock);
-#endif
 		self->base.desc = RelationGetDescr(self->base.rel);
 		self->base.tchecker = CreateTupleChecker(self->base.desc);
 		self->base.tchecker->checker = (CheckerTupleProc) CoercionCheckerTuple;
@@ -293,11 +285,7 @@ ParallelWriterClose(ParallelWriter *self, bool onError)
 		MemoryContextDelete(self->base.context);
 
 		if (self->base.rel)
-#if PG_VERSION_NUM >= 130000
-			table_close(self->base.rel, NoLock);
-#else
 			heap_close(self->base.rel, NoLock);
-#endif
 	}
 
 	return ret;
@@ -349,15 +337,9 @@ write_queue(ParallelWriter *self, const void *buffer, uint32 len)
 {
 	struct iovec	iov[2];
 
-#if PG_VERSION_NUM >= 160000
-	Assert(self->conn != NULL);
-	Assert(self->queue != NULL);
-	Assert(len == 0 || buffer != NULL);
-#else
 	AssertArg(self->conn != NULL);
 	AssertArg(self->queue != NULL);
 	AssertArg(len == 0 || buffer != NULL);
-#endif
 
 	iov[0].iov_base = &len;
 	iov[0].iov_len = sizeof(len);

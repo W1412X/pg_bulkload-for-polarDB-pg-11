@@ -1,7 +1,7 @@
 /*
  * pg_bulkload: lib/parser_csv.c
  *
- *	  Copyright (c) 2007-2024, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ *	  Copyright (c) 2007-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
  */
 
 /**
@@ -371,24 +371,25 @@ CSVParserRead(CSVParser *self, Checker *checker)
 	{
 		int		len;
 		int		skipped = 0;
+		bool	inCR = false;
 
 		while ((len = SourceRead(self->source, self->rec_buf, self->buf_len - 1)) > 0)
 		{
-			int		n;
+			int		i;
 
-			for (n = 0; n < len; n++)
+			for (i = 0; i < len; i++)
 			{
-				if (self->rec_buf[n] == '\r')
+				if (self->rec_buf[i] == '\r')
 				{
-					if (n == len - 1)
+					if (i == len - 1)
 					{
 						inCR = true;
 						continue;
 					}
-					else if (self->rec_buf[n + 1] == '\n')
-						n++;
+					else if (self->rec_buf[i + 1] == '\n')
+						i++;
 				}
-				else if (!inCR && self->rec_buf[n] != '\n')
+				else if (!inCR && self->rec_buf[i] != '\n')
 					continue;
 
 				/* Skip the line */
@@ -397,7 +398,7 @@ CSVParserRead(CSVParser *self, Checker *checker)
 				if (skipped >= self->need_offset)
 				{
 					/* Seek to head of the next line. */
-					self->next = self->rec_buf + n + 1;
+					self->next = self->rec_buf + i + 1;
 					self->used_len = len;
 					self->rec_buf[self->used_len] = '\0';
 					goto skip_done;

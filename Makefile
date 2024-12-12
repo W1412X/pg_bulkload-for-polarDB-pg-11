@@ -1,7 +1,7 @@
 #
 # pg_bulkload: Makefile
 #
-#    Copyright (c) 2007-2024, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+#    Copyright (c) 2007-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
 #
 ifndef USE_PGXS
 top_builddir = ../..
@@ -12,7 +12,7 @@ endif
 endif
 
 ifdef USE_PGXS
-PG_CONFIG = pg_config
+PG_CONFIG = ~/tmp_basedir_polardb_pg_1100_bld/bin/pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
 else
