@@ -1,7 +1,7 @@
 /*
  * pg_bulkload: lib/writer_direct.c
  *
- *	  Copyright (c) 2007-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ *	  Copyright (c) 2007-2024, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
  */
 
 #include "pg_bulkload.h"
@@ -13,7 +13,11 @@
 
 #include "access/heapam.h"
 #include "access/transam.h"
+#if PG_VERSION_NUM >= 130000
+#include "access/heaptoast.h"
+#else
 #include "access/tuptoaster.h"
+#endif
 #include "access/xlog.h"
 #include "catalog/catalog.h"
 #include "catalog/namespace.h"
@@ -117,7 +121,13 @@ static int	DirectWriterSendQuery(DirectWriter *self, PGconn *conn, char *queueNa
 #define LS_TOTAL_CNT(ls)	((ls)->ls.exist_cnt + (ls)->ls.create_cnt)
 
 /* Signature of static functions */
-static int	open_data_file(RelFileNode rnode, bool istemp, BlockNumber blknum);
+static int	open_data_file(
+#if PG_VERSION_NUM >= 160000
+			RelFileLocator rLocator, 
+#else
+			RelFileNode rnode, 
+#endif
+			bool istemp, BlockNumber blknum);
 static void	flush_pages(DirectWriter *loader);
 static void	close_data_file(DirectWriter *loader);
 static void	UpdateLSF(DirectWriter *loader, BlockNumber num);
@@ -164,8 +174,11 @@ DirectWriterInit(DirectWriter *self)
 	 */
 	if (self->base.max_dup_errors < -1)
 		self->base.max_dup_errors = DEFAULT_MAX_DUP_ERRORS;
-
+#if PG_VERSION_NUM >= 130000
+	self->base.rel = table_open(self->base.relid, AccessExclusiveLock);
+#else
 	self->base.rel = heap_open(self->base.relid, AccessExclusiveLock);
+#endif
 	VerifyTarget(self->base.rel, self->base.max_dup_errors);
 
 	self->base.desc = RelationGetDescr(self->base.rel);
@@ -190,7 +203,11 @@ DirectWriterInit(DirectWriter *self)
 	 */
 	ls = &self->ls;
 	ls->ls.relid = self->base.relid;
+#if PG_VERSION_NUM >= 160000
+	ls->ls.rLocator = self->base.rel->rd_locator;
+#else
 	ls->ls.rnode = self->base.rel->rd_node;
+#endif
 	ls->ls.exist_cnt = RelationGetNumberOfBlocks(self->base.rel);
 	ls->ls.create_cnt = 0;
 
@@ -203,7 +220,7 @@ DirectWriterInit(DirectWriter *self)
 	BULKLOAD_LSF_PATH(self->lsf_path, ls);
 #if PG_VERSION_NUM >= 110000
 	self->lsf_fd = BasicOpenFilePerm(self->lsf_path,
-		O_CREAT | O_EXCL | O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR, true);
+		O_CREAT | O_EXCL | O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR, false);
 #else
 	self->lsf_fd = BasicOpenFile(self->lsf_path,
 		O_CREAT | O_EXCL | O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
@@ -212,8 +229,8 @@ DirectWriterInit(DirectWriter *self)
 		ereport(ERROR, (errcode_for_file_access(),
 			errmsg("could not create loadstatus file \"%s\": %m", self->lsf_path)));
 
-	if (polar_write(self->lsf_fd, ls, sizeof(LoadStatus)) != sizeof(LoadStatus) ||
-		polar_fsync(self->lsf_fd) != 0)
+	if (write(self->lsf_fd, ls, sizeof(LoadStatus)) != sizeof(LoadStatus) ||
+		pg_fsync(self->lsf_fd) != 0)
 	{
 		UnlinkLSF(self);
 		ereport(ERROR, (errcode_for_file_access(),
@@ -239,7 +256,11 @@ DirectWriterInsert(DirectWriter *self, HeapTuple tuple)
 
 	/* Compress the tuple data if needed. */
 	if (tuple->t_len > TOAST_TUPLE_THRESHOLD)
+#if PG_VERSION_NUM >= 130000
+		tuple = heap_toast_insert_or_update(self->base.rel, tuple, NULL, 0);
+#else
 		tuple = toast_insert_or_update(self->base.rel, tuple, NULL, 0);
+#endif
 	BULKLOAD_PROFILE(&prof_writer_toast);
 
 #if PG_VERSION_NUM < 120000
@@ -329,7 +350,11 @@ DirectWriterClose(DirectWriter *self, bool onError)
 		ret.num_dup_old = self->spooler.dup_old;
 
 		if (self->base.rel)
+#if PG_VERSION_NUM >= 130000
+			table_close(self->base.rel, AccessExclusiveLock);
+#else
 			heap_close(self->base.rel, AccessExclusiveLock);
+#endif
 
 		if (self->blocks)
 			pfree(self->blocks);
@@ -349,7 +374,11 @@ DirectWriterParam(DirectWriter *self, const char *keyword, char *value)
 		ASSERT_ONCE(self->base.output == NULL);
 
 		self->base.relid = RangeVarGetRelid(makeRangeVarFromNameList(
+#if PG_VERSION_NUM >= 160000
+						stringToQualifiedNameList(value, NULL)), NoLock, false);
+#else
 						stringToQualifiedNameList(value)), NoLock, false);
+#endif
 		self->base.output = get_relation_name(self->base.relid);
 	}
 	else if (CompareKeyword(keyword, "DUPLICATE_BADFILE"))
@@ -512,7 +541,13 @@ flush_pages(DirectWriter *loader)
 	{
 		XLogRecPtr	recptr;
 
-		recptr = log_newpage(&ls->ls.rnode, MAIN_FORKNUM,
+		recptr = log_newpage(
+#if PG_VERSION_NUM >= 160000
+				&ls->ls.rLocator, 
+#else
+				&ls->ls.rnode, 
+#endif
+				MAIN_FORKNUM,
 			ls->ls.exist_cnt, loader->blocks);
 		XLogFlush(recptr);
 	}
@@ -542,7 +577,12 @@ flush_pages(DirectWriter *loader)
 		if (relblks % RELSEG_SIZE == 0)
 			close_data_file(loader);
 		if (loader->datafd == -1)
-			loader->datafd = open_data_file(ls->ls.rnode,
+			loader->datafd = open_data_file(
+#if PG_VERSION_NUM >= 160000
+											ls->ls.rLocator,
+#else
+											ls->ls.rnode,
+#endif
 											RELATION_IS_LOCAL(loader->base.rel),
 											relblks);
 
@@ -585,8 +625,7 @@ flush_pages(DirectWriter *loader)
 		written = 0;
 		while (total > 0)
 		{
-			// int	len = write(loader->datafd, buffer + written, total);
-			int	len = polar_write(loader->datafd, buffer + written, total);
+			int	len = write(loader->datafd, buffer + written, total);
 			if (len == -1)
 			{
 				/* fatal error, do not want to write blocks anymore */
@@ -613,21 +652,43 @@ flush_pages(DirectWriter *loader)
  * @return File descriptor of the last data file.
  */
 static int
-open_data_file(RelFileNode rnode, bool istemp, BlockNumber blknum)
+open_data_file(
+#if PG_VERSION_NUM >= 160000
+				RelFileLocator rLocator, 
+#else
+				RelFileNode rnode, 
+#endif
+				bool istemp, BlockNumber blknum)
 {
 	int			fd = -1;
 	int			ret;
 	BlockNumber segno;
 	char	   *fname = NULL;
+	// 新增2个变量
+	int len;
+	char *pg_fname = NULL;
 
 #if PG_VERSION_NUM >= 90100
+#if PG_VERSION_NUM >= 160000
+	RelFileLocatorBackend	bknode;
+	bknode.locator = rLocator;
+#else
 	RelFileNodeBackend	bknode;
 	bknode.node = rnode;
+#endif
 	bknode.backend = istemp ? MyBackendId : InvalidBackendId;
 	fname = relpath(bknode, MAIN_FORKNUM);
 #else
 	fname = relpath(rnode, MAIN_FORKNUM);
 #endif
+
+    // 新增以下5行代码, 删除fname的前11个字符串: file-dio:// 
+	len = strlen(fname);
+	pg_fname = (char *)palloc(len - 11 + 1);
+	strcpy(pg_fname, fname + 11);
+	ereport(LOG,
+           (errmsg("fname: %s, pg_fname: %s \n", fname, pg_fname)));
+
 	segno = blknum / RELSEG_SIZE;
 	if (segno > 0)
 	{
@@ -639,26 +700,34 @@ open_data_file(RelFileNode rnode, bool istemp, BlockNumber blknum)
 		sprintf(tmp, "%s.%u", fname, segno);
 		pfree(fname);
 		fname = tmp;
+                
+		// 新增以下4行代码, 删除fname的前11个字符串: file-dio:// 
+		pfree(pg_fname);
+		len = strlen(fname);
+		pg_fname = (char *)palloc(len - 11 + 1);
+		strcpy(pg_fname, fname + 11);
 	}
 #if PG_VERSION_NUM >= 110000
-	fd = BasicOpenFilePerm(fname, O_CREAT | O_WRONLY | PG_BINARY, S_IRUSR | S_IWUSR, true);
+	fd = BasicOpenFilePerm(pg_fname, O_CREAT | O_WRONLY | PG_BINARY, S_IRUSR | S_IWUSR, false);
 #else
-	fd = BasicOpenFile(fname, O_CREAT | O_WRONLY | PG_BINARY, S_IRUSR | S_IWUSR);
+	fd = BasicOpenFile(pg_fname, O_CREAT | O_WRONLY | PG_BINARY, S_IRUSR | S_IWUSR);
 #endif
 	if (fd == -1)
 		ereport(ERROR, (errcode_for_file_access(),
 						errmsg("could not open data file: %m")));
-	// ret = lseek(fd, BLCKSZ * (blknum % RELSEG_SIZE), SEEK_SET);
-	ret = polar_lseek(fd, BLCKSZ * (blknum % RELSEG_SIZE), SEEK_SET);
+	ret = lseek(fd, BLCKSZ * (blknum % RELSEG_SIZE), SEEK_SET);
 	if (ret == -1)
 	{
-		polar_close(fd);
+		close(fd);
 		ereport(ERROR, (errcode_for_file_access(),
 						errmsg
 						("could not seek the end of the data file: %m")));
 	}
 
 	pfree(fname);
+
+	// 新增以下1行代码, 释放pg_fname内存空间 
+	pfree(pg_fname); 
 
 	return fd;
 }
@@ -673,10 +742,10 @@ close_data_file(DirectWriter *loader)
 {
 	if (loader->datafd != -1)
 	{
-		if (polar_fsync(loader->datafd) != 0)
+		if (pg_fsync(loader->datafd) != 0)
 			ereport(WARNING, (errcode_for_file_access(),
 						errmsg("could not sync data file: %m")));
-		if (polar_close(loader->datafd) < 0)
+		if (close(loader->datafd) < 0)
 			ereport(WARNING, (errcode_for_file_access(),
 						errmsg("could not close data file: %m")));
 		loader->datafd = -1;
@@ -697,15 +766,13 @@ UpdateLSF(DirectWriter *loader, BlockNumber num)
 
 	ls->ls.create_cnt += num;
 
-	// lseek(loader->lsf_fd, 0, SEEK_SET);
-	polar_lseek(loader->lsf_fd, 0, SEEK_SET);
-	// ret = write(loader->lsf_fd, ls, sizeof(LoadStatus));
-	ret = polar_write(loader->lsf_fd, ls, sizeof(LoadStatus));
+	lseek(loader->lsf_fd, 0, SEEK_SET);
+	ret = write(loader->lsf_fd, ls, sizeof(LoadStatus));
 	if (ret != sizeof(LoadStatus))
 		ereport(ERROR, (errcode_for_file_access(),
 						errmsg("could not write to \"%s\": %m",
 							   loader->lsf_path)));
-	if (polar_fsync(loader->lsf_fd) != 0)
+	if (pg_fsync(loader->lsf_fd) != 0)
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("could not fsync file \"%s\": %m", loader->lsf_path)));
@@ -716,9 +783,9 @@ UnlinkLSF(DirectWriter *loader)
 {
 	if (loader->lsf_fd != -1)
 	{
-		polar_close(loader->lsf_fd);
+		close(loader->lsf_fd);
 		loader->lsf_fd = -1;
-		if (polar_unlink(loader->lsf_path) < 0 && errno != ENOENT)
+		if (unlink(loader->lsf_path) < 0 && errno != ENOENT)
 			ereport(ERROR, (errcode_for_file_access(),
 						errmsg("could not unlink load status file: %m")));
 	}
@@ -732,8 +799,7 @@ ValidateLSFDirectory(const char *path)
 {
 	struct stat	stat_buf;
 
-	// if (stat(path, &stat_buf) == 0)
-	if (polar_stat(path, &stat_buf) == 0)
+	if (stat(path, &stat_buf) == 0)
 	{
 		/* Check for weird cases where it exists but isn't a directory */
 		if (!S_ISDIR(stat_buf.st_mode))
@@ -745,7 +811,7 @@ ValidateLSFDirectory(const char *path)
 	{
 		ereport(LOG,
 				(errmsg("pg_bulkload: creating missing LSF directory \"%s\"", path)));
-		if (polar_mkdir(path, 0700) < 0)
+		if (mkdir(path, 0700) < 0)
 			ereport(ERROR,
 					(errmsg("could not create missing directory \"%s\": %m",
 							path)));

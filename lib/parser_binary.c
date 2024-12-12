@@ -1,7 +1,7 @@
 /*
  * pg_bulkload: lib/parser_binary.c
  *
- *	  Copyright (c) 2007-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ *	  Copyright (c) 2007-2024, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
  */
 
 /**
@@ -217,9 +217,9 @@ BinaryParserRead(BinaryParser *self, Checker *checker)
 	/* Skip first offset lines in the input file */
 	if (unlikely(self->need_offset > 0))
 	{
-		int		i;
+		int		n;
 
-		for (i = 0; i < self->need_offset; i++)
+		for (n = 0; n < self->need_offset; n++)
 		{
 			int		len;
 			len = SourceRead(self->source, self->buffer, self->rec_len);

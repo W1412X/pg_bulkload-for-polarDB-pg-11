@@ -2,7 +2,8 @@
 - a version that adapts to polardb-for-pg11
 - restart the polardb after copy  
 - build as followed  
-
+- also add support for px  
+W
 pg_bulkload
 =======
 pg_bulkload is a high speed data loading tool for PostgreSQL.

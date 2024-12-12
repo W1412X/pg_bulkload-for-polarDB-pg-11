@@ -1,7 +1,7 @@
 /*
  * pg_bulkload: lib/writer_binary.c
  *
- *	  Copyright (c) 2011-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ *	  Copyright (c) 2011-2024, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
  */
 
 #include "pg_bulkload.h"
@@ -198,7 +198,7 @@ BinaryWriterInsert(BinaryWriter *self, HeapTuple tuple)
 	{
 		int	len = self->rec_len * self->used_rec_cnt;
 
-		if (polar_write(self->bin_fd, self->buffer, len) != len)
+		if (write(self->bin_fd, self->buffer, len) != len)
 			ereport(ERROR,
 					(errcode_for_file_access(),
 					 errmsg("could not write to binary output file: %m")));
@@ -223,7 +223,7 @@ BinaryWriterClose(BinaryWriter *self, bool onError)
 	{
 		int	len = self->rec_len * self->used_rec_cnt;
 
-		if (polar_write(self->bin_fd, self->buffer, len) != len)
+		if (write(self->bin_fd, self->buffer, len) != len)
 			ereport(WARNING,
 					(errcode_for_file_access(),
 					 errmsg("could not write to binary output file: %m")));
@@ -271,7 +271,7 @@ BinaryWriterClose(BinaryWriter *self, bool onError)
 		BinaryDumpParams(self->fields, self->nfield, &buf, "COL");
 		appendStringInfo(&buf, "# ENCODING = %s\n", GetDatabaseEncodingName());
 
-		if (polar_write(self->ctl_fd, buf.data, buf.len) != buf.len)
+		if (write(self->ctl_fd, buf.data, buf.len) != buf.len)
 			ereport(WARNING,
 					(errcode_for_file_access(),
 					 errmsg("could not write to sample control file: %m")));
@@ -428,7 +428,7 @@ open_output_file(char *fname, char *filetype, bool check)
 
 #if PG_VERSION_NUM >= 110000
 	fd = BasicOpenFilePerm(fname, O_WRONLY | O_CREAT | O_EXCL | PG_BINARY,
-					   S_IRUSR | S_IWUSR, true);
+					   S_IRUSR | S_IWUSR, false);
 #else
 	fd = BasicOpenFile(fname, O_WRONLY | O_CREAT | O_EXCL | PG_BINARY,
 					   S_IRUSR | S_IWUSR);
@@ -440,7 +440,7 @@ open_output_file(char *fname, char *filetype, bool check)
 	if (check)
 	{
 		close_output_file(&fd, filetype);
-		polar_unlink(fname);
+		unlink(fname);
 	}
 
 	return fd;
@@ -455,11 +455,11 @@ close_output_file(int *fd, char *filetype)
 	if (*fd == -1)
 		return;
 
-	if (polar_fsync(*fd) != 0)
+	if (pg_fsync(*fd) != 0)
 		ereport(WARNING, (errcode_for_file_access(),
 				errmsg("could not fsync %s: %m", filetype)));
 
-	if (polar_close(*fd) != 0)
+	if (close(*fd) != 0)
 		ereport(WARNING, (errcode_for_file_access(),
 				errmsg("could not close %s: %m", filetype)));
 

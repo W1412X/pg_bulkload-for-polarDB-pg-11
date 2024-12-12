@@ -2,7 +2,7 @@
  *
  * pgut-ipc.c
  *
- * Copyright (c) 2009-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ * Copyright (c) 2009-2024, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
  *
  *-------------------------------------------------------------------------
  */
@@ -11,11 +11,16 @@
 
 #include <unistd.h>
 
+#if PG_VERSION_NUM >= 160000
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#else
 #ifdef HAVE_SYS_IPC_H
 #include <sys/ipc.h>
 #endif
 #ifdef HAVE_SYS_SHM_H
 #include <sys/shm.h>
+#endif
 #endif
 #ifdef HAVE_KERNEL_OS_H
 #include <kernel/OS.h>

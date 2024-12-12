@@ -1,7 +1,7 @@
 /*
  * pg_bulkload: lib/writer_buffered.c
  *
- *	  Copyright (c) 2007-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ *	  Copyright (c) 2007-2024, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
  */
 
 #include "postgres.h"
@@ -74,8 +74,11 @@ BufferedWriterInit(BufferedWriter *self)
 	 */
 	if (self->base.max_dup_errors < -1)
 		self->base.max_dup_errors = DEFAULT_MAX_DUP_ERRORS;
-
+#if PG_VERSION_NUM >= 130000
+	self->base.rel = table_open(self->base.relid, AccessExclusiveLock);
+#else
 	self->base.rel = heap_open(self->base.relid, AccessExclusiveLock);
+#endif
 	VerifyTarget(self->base.rel, self->base.max_dup_errors);
 
 	self->base.desc = RelationGetDescr(self->base.rel);
@@ -117,7 +120,11 @@ BufferedWriterClose(BufferedWriter *self, bool onError)
 		ret.num_dup_old = self->spooler.dup_old;
 
 		if (self->base.rel)
+#if PG_VERSION_NUM >= 130000
+			table_close(self->base.rel, AccessExclusiveLock);
+#else
 			heap_close(self->base.rel, AccessExclusiveLock);
+#endif
 
 		pfree(self);
 	}
@@ -134,7 +141,12 @@ BufferedWriterParam(BufferedWriter *self, const char *keyword, char *value)
 		ASSERT_ONCE(self->base.output == NULL);
 
 		self->base.relid = RangeVarGetRelid(makeRangeVarFromNameList(
-						stringToQualifiedNameList(value)), NoLock, false);
+#if PG_VERSION_NUM >= 160000
+				stringToQualifiedNameList(value, NULL)), NoLock, false);
+#else
+				stringToQualifiedNameList(value)), NoLock, false);
+#endif
+
 		self->base.output = get_relation_name(self->base.relid);
 	}
 	else if (CompareKeyword(keyword, "DUPLICATE_BADFILE"))

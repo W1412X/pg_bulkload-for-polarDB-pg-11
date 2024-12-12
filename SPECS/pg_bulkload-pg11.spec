@@ -1,5 +1,5 @@
 # SPEC file for pg_bulkload on PostgreSQL 11
-# Copyright (C) 2009-2021 NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+# Copyright (C) 2009-2024 NIPPON TELEGRAPH AND TELEPHONE CORPORATION
 
 %define sname                   pg_bulkload
 %define pgmajorversion  11
@@ -10,7 +10,7 @@
 
 Summary:        High speed data load utility for PostgreSQL
 Name:           %{sname}
-Version:        3.1.17
+Version:        3.1.21
 Release:        1%{?dist}
 License:        BSD
 Group:          Applications/Databases
@@ -31,7 +31,7 @@ When we load huge amount of data to a database, it is common situation that data
 
 %package llvmjit
 Requires: postgresql11-server, postgresql11-llvmjit
-Requires: pg_bulkload = 3.1.17
+Requires: pg_bulkload = %{version}
 Summary:  Just-in-time compilation support for pg_bulkload
 
 %description llvmjit
@@ -62,11 +62,8 @@ install -m 755 bin/postgresql                  %{buildroot}%{_bindir}/postgresql
 install -m 755 lib/pg_bulkload.so              %{buildroot}%{_libdir}/pg_bulkload.so
 install -m 644 lib/pg_bulkload.bc %{buildroot}%{_bcdir}/pg_bulkload.bc
 
-install -m 644 lib/pg_bulkload.sql             %{buildroot}%{pg_contribdir}/pg_bulkload.sql
-install -m 644 lib/uninstall_pg_bulkload.sql   %{buildroot}%{pg_contribdir}/uninstall_pg_bulkload.sql
 install -m 644 lib/pg_bulkload.control         %{buildroot}%{pg_extensiondir}/pg_bulkload.control
-install -m 644 lib/pg_bulkload--1.0.sql        %{buildroot}%{pg_extensiondir}/pg_bulkload--1.0.sql
-install -m 644 lib/pg_bulkload--unpackaged--1.0.sql         %{buildroot}%{pg_extensiondir}/pg_bulkload--unpackaged--1.0.sql
+install -m 644 lib/pg_bulkload--%{version}.sql        %{buildroot}%{pg_extensiondir}/pg_bulkload--%{version}.sql
 
 # sample_*.ctl files are needed for rpm users.
 # %{sname}-%{version} is the same path with "%setup -n"'s argument.
@@ -80,13 +77,10 @@ install -m 644 docs/sample_csv.ctl              %{buildroot}%{pg_contribdir}/sam
 %{_libdir}/pg_bulkload.so
 %defattr(644,root,root,755)
 #%doc README.pg_bulkload
-%{pg_contribdir}/pg_bulkload.sql
-%{pg_contribdir}/uninstall_pg_bulkload.sql
 %{pg_contribdir}/sample_bin.ctl
 %{pg_contribdir}/sample_csv.ctl
 %{pg_extensiondir}/pg_bulkload.control
-%{pg_extensiondir}/pg_bulkload--1.0.sql
-%{pg_extensiondir}/pg_bulkload--unpackaged--1.0.sql
+%{pg_extensiondir}/pg_bulkload--%{version}.sql
 
 %files llvmjit
 %defattr(0755,root,root)
@@ -99,7 +93,16 @@ rm -rf %{buildroot}
 rm -rf %{_libdir}/pgxs/src/backend/
 
 %changelog
+* Thu Jan 16 2024 - NTT OSS Center <zuowei.yan.tb@hco.ntt.co.jp> 3.1.21-1
+- Update to pg_bulkload 3.1.21
+* Thu Jan 13 2023 - NTT OSS Center <zuowei.yan.tb@hco.ntt.co.jp> 3.1.20-1
+- Update to pg_bulkload 3.1.20
+* Mon Oct 11 2021 - Masahiro ikeda <masahiro.ikeda.us@hco.ntt.co.jp> 3.1.19-1
+- Update to pg_bulkload 3.1.19
+* Tue Jun 01 2021 - Yanmei Sun <yanmei.sun.ep@hco.ntt.co.jp> 3.1.18-1
+- Update to pg_bulkload 3.1.18
 * Fri Feb 05 2021 - Moon Insung <insung.moon.gk@hco.ntt.co.jp> 3.1.17-1
+- Update to pg_bulkload 3.1.17
 * Wed Jan 22 2020 - Moon Insung <insung.moon.gk@hco.ntt.co.jp> 3.1.16-1
 - Update to pg_bulkload 3.1.16
 - Warn users of some risks of using parallel/multi-process mode

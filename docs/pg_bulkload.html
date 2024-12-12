@@ -69,7 +69,7 @@ Also in version 3.1, parallel loading works more effectively than before.
 </p>
 
 <p>
-There are some bugs in old version of 3.1. Please check <a href="#releasenote">Release notes</a>, and use newer versions. 
+There are some bugs in old version of 3.1. Please check <a href="#releasenote">Release notes</a>, and use newer versions.
 </p>
 
 <h2 id="examples">Examples</h2>
@@ -80,11 +80,11 @@ pg_bulkload provides two programs.
 
 <h3>postgresql script</h3>
 <p>
-This is a wrapper command for <code>pg_ctl</code>, which starts and stops PostgreSQL 
-server.  postgresql script invokes <code>pg_ctl</code> internally.   postgresql script 
+This is a wrapper command for <code>pg_ctl</code>, which starts and stops PostgreSQL
+server.  postgresql script invokes <code>pg_ctl</code> internally.   postgresql script
 provides very important pg_bulkload functionality i.e. recovery.   To improve
 performance, pg_bulkload bypasses some of PostgreSQL's internal functionality
-such as WAL.   Therefore, pg_bulkload needs to provide separate recovery 
+such as WAL.   Therefore, pg_bulkload needs to provide separate recovery
 procedure before usual PostgreSQL's recovery is performed.   postgresql script
 provides this feature.
 </p>
@@ -98,15 +98,15 @@ Notice that DIRECT mode is <b>the default settings</b>.
 <h3>pg_bulkload</h3>
 <p>
 This program is used to load the data.
-Internally, it invokes PostgreSQL's user-defined function called pg_bulkload() and perform the loading.   
+Internally, it invokes PostgreSQL's user-defined function called pg_bulkload() and perform the loading.
 pg_bulkload() function will be installed during pg_bulkload installation.
 </p>
 
 <p>
-You can use pg_bulklad by the following three steps:
+You can use pg_bulkload by the following three steps:
 </p>
 <ol>
-<li>Edit control file "<a href="sample_csv.ctl">sample_csv.ctl</a>" or "<a href="sample_bin.ctl">sample_bin.ctl</a>" that includes settigs for data loading. You can specify table name, absolute path for input file, description of the input file, and so on.
+<li>Edit control file "<a href="sample_csv.ctl">sample_csv.ctl</a>" or "<a href="sample_bin.ctl">sample_bin.ctl</a>" that includes settings for data loading. You can specify table name, absolute path for input file, description of the input file, and so on.
 
 <li>Assume there is a directory <code>$PGDATA/pg_bulkload</code>, in that load status files are created.
 
@@ -204,7 +204,7 @@ If that is not set, the user name specified for the connection is used.
 
 <dt>-U username<br />
 --username username</dt>
-<dd>User name to connect as. </dd>
+<dd>User name to connect as. The user must be a superuser for pg_bulkload execution.</dd>
 
 <dt>-W<br />--password</dt>
 <dd>Force pg_bulkload to prompt for a password before connecting to a database.</dd>
@@ -273,14 +273,24 @@ The value is treated as following depending on the TYPE option:
   <li>A SQL function:
       Specify a SQL function with arguments that returns set of input data.
       It is available only when "TYPE=FUNCTION".
-      The following example uses a built-in function, but you can also use any user-defined functions.
+      You can use not only build-in functions but also any user-defined functions.
+      The defined functions should return the type as SETOF sometype, or as RETURNS TABLE(columns).
+      Note that you specify attributes types if you use sometype. Because there is a case that
+      assignment cast to cstring type which pg_bulkload uses internally, doesn't be permitted.
       Note that you might need to develop those function with C language instead of PL/pgSQL
       because the function must use SFRM_ValuePerCall mode for streaming loading.
+      <p>Here is an example of user-defined function.</p>
+<pre>$ CREATE TYPE sample_type AS (sum integer, name char(10));
+$ CREATE FUNCTION sample_function() RETURNS SETOF sample_type
+    AS $$ SELECT id1 + id2, upper(name) FROM INPUT_TABLE $$
+    LANGUAGE SQL;
+</pre>
+      <p>Here is an example of a control file.</p>
 <pre>TABLE = sample_table
 TYPE = FUNCTION
 WRITER = DIRECT
-INPUT = generate_series(1, 1000)  # sequential numbers from 1 to 1000
-...</pre></li>
+INPUT = sample_function()          # if to use the user-defined function
+#INPUT = generate_series(1, 1000)  # if to use the build-in function, which generate sequential numbers from 1 to 1000
 </ul>
 </dd>
 
@@ -299,7 +309,7 @@ The method to load data. The default is DIRECT.
   <li>PARALLEL : Same as "WRITER=DIRECT" and "MULTI_PROCESS=YES".
                  If PARALLEL is specified, <a href="#MULTI_PROCESS">MULTI_PROCESS</a> is ignored.
                  If password authentication is configured to the database to load,
-                 you have to set up the password file. See <a href="#restrictions">Restrictions</a> for details. 
+                 you have to set up the password file. See <a href="#restrictions">Restrictions</a> for details.
 </ul>
 </dd>
 
@@ -482,7 +492,7 @@ If NO, we use only single thread for them instead of doing parallel processing.
 The default is NO.
 If WRITER is PARALLEL, MULTI_PROCESS is ignored.
 If password authentication is configured to the database to load,
-you have to set up the password file. See <a href="#restrictions">Restrictions</a> for details. 
+you have to set up the password file. See <a href="#restrictions">Restrictions</a> for details.
 Please make sure when enabling MULTI_PROCESS that no other PostgreSQL backend
 process is trying to modify the schema of the table, because it may cause the
 schema of the table as seen by the reader and the writer processes to differ
@@ -697,24 +707,24 @@ If you use pg_bulkload in Windows operating system, postgresql script is not inc
 <p>
 Because of bypassing WAL, archive recovery by PITR is not available.
 This does not mean that it can be done PITR without loaded tables data.
-If you would like to use PITR, take a full backup of the 
+If you would like to use PITR, take a full backup of the
 database after load via pg_bulkload.
 If you are using streaming replication, you need to re-create your standby based on the backup set which is taken after pg_bulkload.
 </p>
 
 <h4>Load status file in $PGDATA/pg_bulkload</h4>
-<p>  
-You must not remove the load status file (*.loadstatus) found in 
+<p>
+You must not remove the load status file (*.loadstatus) found in
 <code>$PGDATA/pg_bulkload</code> directory.
 This file is needed in pg_bulkload crash recovery.
 </p>
 
 <h4>Do not use <code>kill -9</code></h4>
 <p>
-Do not terminate pg_bulkload command using "<code>kill -9</code>" as much as possible.   If you did this, you 
-must invoke postgresql script to perform pg_bulkload recovery and restart 
+Do not terminate pg_bulkload command using "<code>kill -9</code>" as much as possible.   If you did this, you
+must invoke postgresql script to perform pg_bulkload recovery and restart
 PostgreSQL to continue.
-<p>  
+<p>
 
 <h4>Authentication can fail when MULTI_PROCESS=YES</h4>
 <p> When MULTI_PROCESS=YES and password is required to connect from localhost
@@ -824,11 +834,7 @@ $ make USE_PGXS=1
 $ su
 $ make USE_PGXS=1 install</pre>
 
-<p>Then, register functions to the database.</p>
-<pre>$ postgresql start
-$ psql -f $PGSHARE/extension/pg_bulkload.sql database_name</pre>
-
-<p>You can also use CREATE EXTENSION to register functions (Must be database superuser).</p>
+<p>You can use CREATE EXTENSION to register functions (Must be database superuser).</p>
 <pre>$ psql database_name
 database_name=# CREATE EXTENSION pg_bulkload;</pre>
 
@@ -848,28 +854,76 @@ The following command will install pg_bulkload:
 <p>You can find where files are installed:</p>
 <pre># rpm -qs pg_bulkload </pre>
 
-<p>Finally, register functions to the database.
-The script pg_bulkload.sql is in the path diplayed by rpm -qs.
-$PGSHARE is used instead in the following example:</p>
-<pre>$ postgresql start
-$ psql -f $PGSHARE/extension/pg_bulkload.sql database_name</pre>
-
-<p>You can also use CREATE EXTENSION to register functions (Must be database superuser).</p>
+<p>As similar to installing from source code, You can use CREATE EXTENSION to register functions (Must be database superuser).</p>
 <pre>$ psql database_name
 database_name=# CREATE EXTENSION pg_bulkload;</pre>
+
+<h2 id="upgrade">Upgrade</h2>
+<p>If you are upgrading from a previous version of pg_bulkload, just drop the old version from the database and install the new version.</p>
+<p>The following three steps can be used to upgrade pg_bulkload.</p>
+<ol>
+<li>Execute a DROP EXTENSION statement to drop the old version of pg_bulkload from the database.</li>
+<pre>database_name# DROP EXTENSION pg_bulkload;
+DROP EXTENSION</pre>
+<li>Remove the old version of pg_bulkload.</li>
+<p>If installed from source code:</p>
+<pre># make USE_PGXS=1 uninstall</pre>
+<p>If installed from  RPM package:</p> 
+<pre># rpm -e pg_bulkload-&lt;version&gt;.rpm</pre>
+<li>Follow the <a href="#install">Installation</a> instructions to install a new version of pg_bulkload.</li>
+</ol>
 
 <h2 id="requirement">Requirements</h2>
 <dl>
 <dt>PostgreSQL versions</dt>
-<dd>PostgreSQL 9.3, 9.4, 9.5, 9.6, 10, 11, 12</dd>
+<dd>PostgreSQL 11, 12, 13, 14, 15, 16</dd>
 <dt>OS</dt>
-<dd>RHEL 6/7</dd>
+<dd>RHEL 7, 8, 9</dd>
 </dl>
 
 <h2 id="releasenote">Release Notes</h2>
 
 <p>
+<h4>3.1.21</h4>
+<ul>
+<li>Added support for PostgreSQL 16</li>
+<li>Fixed incorrect version display of pg_bulkload</li>
+<li>Fix duplication handling for large data set</li>
+</ul>
+</p>
+
+<p>
+<h4>3.1.20</h4>
+<ul>
+<li>Added support for PostgreSQL 15</li>
+</ul>
+</p>
+
+<p>
+<h4>3.1.19</h4>
+<ul>
+<li>Added support for PostgreSQL 14</li>
+</ul>
+</p>
+
+<p>
+<h4>3.1.18</h4>
+<ul>
+<li>Add a note to the documentation about using the "-o TYPE=FUNCTION" option, which was a problem left in version 3.1.17.</li>
+<li>Fix build failure on Ubuntu environment</li>
+</ul>
+</p>
+
+<p>
 <h4>3.1.17</h4>
+<ul>
+<li>Added support for PostgreSQL 13</li>
+<li>Fixed a crash when merging B-tree indexes (Sincerely thank you, Haruka Takatsuka-san, for reporting the problem and suggesting a solution.)</li>
+</ul>
+</p>
+
+<p>
+<h4>3.1.16</h4>
 <ul>
 <li>Added support for PostgreSQL 12</li>
 <li>Fixed documentation to warn users of some risks of using parallel/multi-process mode</li>
@@ -986,7 +1040,7 @@ From pg_bulkload-VERSIONX_X_X-X.pgXX.rhelX.rpm to pg_bulkload-X.X.XX-X.pgXX.rhel
   <a href="index.html">Top</a> &gt;
   <a href="pg_bulkload.html">pg_bulkload</a>
 <div>
-<p class="footer">Copyright (c) 2007-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION</p>
+<p class="footer">Copyright (c) 2007-2024, NIPPON TELEGRAPH AND TELEPHONE CORPORATION</p>
 
 <script type="text/javascript">
 var gaJsHost = (("https:" == document.location.protocol) ? "https://ssl." : "http://www.");

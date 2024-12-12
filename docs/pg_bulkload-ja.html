@@ -185,7 +185,7 @@ NOTICE: BULK LOAD END
 
 <dt>-U USERNAME<br />
 --username=USERNAME</dt>
-<dd>接続するユーザ名を指定します。</dd>
+<dd>接続するユーザ名を指定します。pg_bulkloadの実行ユーザは、スーパユーザ権限が必要です。</dd>
 
 <dt>-W<br />
 --password</dt>
@@ -255,16 +255,26 @@ DEBUG, INFO, NOTICE, WARNING, ERROR, LOG, FATAL, PANIC から選択します。
       「INPUT=stdin」と記述すると、pg_bulkload コマンドの標準入力から入力データを読み取ります。
       入力ファイルとデータベースが異なるサーバに配置されている場合には、こちらの形式を使用してください。「TYPE=CSV」および「TYPE=BINARY」と指定した場合のみ使用可能です。使用例を以下に示します。
 <pre>$ pg_bulkload csv_load.ctl &lt; DATA.csv</pre></li>
-  <li>SQL関数の結果：入力データを返す SQL 関数の呼び出し式を指定します。
-      この形式で使用するSQL関数は、SETOF RECORD を返す必要があります。
+  <li>SQL関数：入力データを返す SQL 関数の呼び出し式を指定します。
       「TYPE=FUNCTION」と指定した場合のみ使用可能です。
-      以下の使用例では組み込みの関数を指定していますが、ユーザ定義関数を指定することも可能です。
-      ただし、大量のデータをロードする場合には PL/pgSQL ではなく C言語での関数作成を推奨します。
-      ストリーミング・ロードを行うため SFRM_ValuePerCall モードで実装される必要があるためです。
+      組み込みの関数だけでなく、ユーザ定義関数を指定することも可能です。
+      この形式で使用するSQL関数は、SETOF sometype型、もしくは、RETURNS TABLE(columns)を返す必要があります。
+      ただし、sometype型は、各属性の型も定義をしてください。内部的にcstring型を
+      利用していますが、record型では、各属性の代入キャストが出来ないケースがあるためです。
+      なお、大量のデータをロードする場合には PL/pgSQL ではなく C言語での関数作成を推奨します。
+      ストリーミング・ロードを行うため SFRM_ValuePerCall モードで実装される必要があるためです。<br>
+      <p>ユーザ関数の定義例を以下に示します。</p>
+<pre>$ CREATE TYPE sample_type AS (sum integer, name char(10));
+$ CREATE FUNCTION sample_function() RETURNS SETOF sample_type
+    AS $$ SELECT id1 + id2, upper(name) FROM INPUT_TABLE $$
+    LANGUAGE SQL;
+</pre>
+      <p>制御ファイルの作成例を以下に示します。</p>
 <pre>TABLE = sample_table
 TYPE = FUNCTION
 WRITER = DIRECT
-INPUT = generate_series(1, 1000)  # 1から1,000の連番をロードする
+INPUT = sample_function()          # ユーザ定義の関数を利用する場合
+#INPUT = generate_series(1, 1000)  # 組み込みの関数を利用する場合。1から1,000の連番をロードする
 ...</pre></li>
 </ul>
 </dd>
@@ -381,7 +391,7 @@ FILTER オプションは、「TYPE=FUNCTION」と FILTER の両方を指定し�
 <dd>
 ロード時に CHECK 制約を検査するかどうかを指定します。
 デフォルトは NO です。
-CHECK_CONSTRAINTS を「WRITER=BINARY」と同時に指定した場合はエラーになります。 
+CHECK_CONSTRAINTS を「WRITER=BINARY」と同時に指定した場合はエラーになります。
 </dd>
 
 <dt>PARSE_ERRORS = n </dt>
@@ -398,7 +408,7 @@ CHECK_CONSTRAINTS を「WRITER=BINARY」と同時に指定した場合はエラ�
 デフォルトは 0 です。
 一意制約に違反するレコードの数がこの値を超えた場合は、<strong>その時点でロールバックしてロード処理全体を取り消します</strong>。
 エラーを1件も許容しない場合は 0 を、全てのエラーを許容する場合は -1 または INFINITE を指定します。
-DUPLICATE_ERRORS を「WRITER=BINARY」と同時に指定した場合はエラーになります。 
+DUPLICATE_ERRORS を「WRITER=BINARY」と同時に指定した場合はエラーになります。
 </dd>
 
 <dt>ON_DUPLICATE_KEEP = NEW | OLD</dt>
@@ -406,7 +416,7 @@ DUPLICATE_ERRORS を「WRITER=BINARY」と同時に指定した場合はエラ�
 削除されたレコードの内容は DUPLICATE_BADFILE に書き出されます。
 デフォルトは NEW です。
 このオプションを利用する場合、DUPLICATE_ERRORS も 0 より大きな数に設定する必要があります。
-ON_DUPLICATE_KEEP を「WRITER=BINARY」と同時に指定した場合はエラーになります。 
+ON_DUPLICATE_KEEP を「WRITER=BINARY」と同時に指定した場合はエラーになります。
 <ul>
   <li>NEW : 入力データに存在するレコードを残し、既にテーブルに存在していたレコードを削除します。
             入力データ内に一意制約違反となるレコードが存在していた場合は、ファイルの末尾側のレコードを残します。</li>
@@ -435,7 +445,7 @@ ON_DUPLICATE_KEEP を「WRITER=BINARY」と同時に指定した場合はエラ�
 このファイルには、入力ファイルの形式によらず CSV 形式で記録されます。
 相対パスで指定した場合の扱いは <a href="#INPUT">INPUT</a> と同じです。
 デフォルトは $PGDATA/pg_bulkload/&lt;タイムスタンプ&gt;_&lt;DB名&gt;_&lt;スキーマ名&gt;_&lt;テーブル名&gt;.dup.csv です。
-DUPLICATE_BADFILE を「WRITER=BINARY」と同時に指定した場合はエラーになります。 
+DUPLICATE_BADFILE を「WRITER=BINARY」と同時に指定した場合はエラーになります。
 </dd>
 
 <dt>TRUNCATE = YES | NO</dt>
@@ -443,7 +453,7 @@ DUPLICATE_BADFILE を「WRITER=BINARY」と同時に指定した場合はエラ�
 YES の場合は、データロードの前にテーブルから全ての行を削除します。
 内部的には SQL の TRUNCATE 相当の処理を行っています。
 NO の場合は削除しません。デフォルトは NO です。
-TRUNCATE を「WRITER=BINARY」と同時に指定した場合はエラーになります。 
+TRUNCATE を「WRITER=BINARY」と同時に指定した場合はエラーになります。
 </dd>
 
 <dt>VERBOSE = YES | NO</dt>
@@ -746,13 +756,9 @@ CHECK 制約を適用する場合は "CHECK_CONSTRAINTS=YES" を指定してく�
 <pre>$ cd pg_bulkload
 $ make USE_PGXS=1
 $ su
-$ make USE_PGXS=1 install</pre>
+# make USE_PGXS=1 install</pre>
 
-<p>pg_bulkload 用の関数を登録します。</p>
-<pre>$ postgresql start
-$ psql -f $PGSHARE/extension/pg_bulkload.sql database_name</pre>
-
-<p>PostgreSQL9.2以降では、sqlファイルによる登録の他に、CREATE EXTENSION文を用いた登録も可能です。ただし、CREATE EXTENSION文はDBスーパーユーザにて実行してください。</p>
+<p>CREATE EXTENSION文を用いて pg_bulkload 用の関数を登録します。ただし、CREATE EXTENSION文はDBスーパーユーザにて実行してください。</p>
 <pre>$ psql database_name
 database_name=# CREATE EXTENSION pg_bulkload;</pre>
 
@@ -761,37 +767,87 @@ database_name=# CREATE EXTENSION pg_bulkload;</pre>
 pg_bulkload インストール前に postgresql パッケージがインストールされていることを確認してください。
 </p>
 <p> 次のコマンドで pg_bulkload をインストールします。</p>
-<pre> # rpm -ivh pg_bulkload-&lt;version&gt;.rpm</pre>
+<pre># rpm -ivh pg_bulkload-&lt;version&gt;.rpm</pre>
 
 <p>以下のコマンドでインストールされたかどうかを確認できます。</p>
-<pre> # rpm -qa | grep pg_bulkload</pre>
+<pre># rpm -qa | grep pg_bulkload</pre>
 
 <p>また、以下のコマンドで、各ファイルがどこにインストールされたかを確認できます。</p>
 <pre># rpm -qs pg_bulkload </pre>
 
-<p>pg_bulkload 用の関数を登録します。上記 rpm -qs の実行結果で表示される pg_bulkload.sql のパスを確認してください。以下の例では環境変数 $PGSHARE を利用しています。</p>
-<pre>$ postgresql start
-$ psql -f $PGSHARE/extension/pg_bulkload.sql database_name</pre>
-
-<p>ソースコードからのインストール同様、CREATE EXTENSION文を用いた登録も可能です。ただし、CREATE EXTENSION文はDBスーパーユーザにて実行してください。</p>
+<p>ソースコードからのインストール同様、CREATE EXTENSION文を用いて pg_bulkload 用の関数を登録します。ただし、CREATE EXTENSION文はDBスーパーユーザにて実行してください。</p>
 <pre>$ psql database_name
 database_name=# CREATE EXTENSION pg_bulkload;</pre>
 
 <p>なお、regression testを行うにはPostgreSQLサーバを起動させた状態で、以下のコマンドを実行してください。</p>
 <pre>$ make installcheck</pre>
 
+<h2 id="upgrade">アップグレード方法</h2>
+<p>pg_bulkload を新しいバージョンにアップグレードする場合、前のバージョンを削除する必要があります。</p>
+<p>次の3ステップにより、pg_bulkloadをアップグレードすることが可能です。</p>
+<ol>
+<li>DROP EXTENSION文を実行し、古いバージョンの pg_bulkload を database からドロップします。</li>
+<pre>database_name# DROP EXTENSION pg_bulkload;
+DROP EXTENSION</pre>
+<li>古いバージョンの pg_bulkload を削除します。</li>
+<p>ソースコードからインストールした場合:</p>
+<pre># make USE_PGXS=1 uninstall</pre>
+<p>RPM パッケージからインストールした場合:</p>
+<pre># rpm -e pg_bulkload-&lt;version&gt;.rpm</pre>
+<li><a href="#install">インストール方法</a>の手順に沿って、新しいバージョンの pg_bulkload をインストールします。</li>
+</ol>
+
 <h2 id="requirement">動作環境</h2>
 <dl>
 <dt>PostgreSQLバージョン</dt>
-<dd>PostgreSQL 9.3, 9.4, 9.5, 9.6, 10, 11, 12</dd>
+<dd>PostgreSQL 11, 12, 13, 14, 15, 16</dd>
 <dt>OS</dt>
-<dd>RHEL 6/7</dd>
+<dd>RHEL 7, 8, 9</dd>
 </dl>
 
 <h2 id="releasenote">リリースノート</h2>
 
 <p>
+<h4>3.1.21</h4>
+<ul>
+<li>PostgreSQL 16に対応</li>
+<li>バージョンが適切に表示されない問題を修正しました。</li>
+<li>一意制約違反を許容している場合でも、一意制約違反でロード時にエラーが発生する問題を修正しました。</li>
+</ul>
+</p>
+
+<p>
+<h4>3.1.20</h4>
+<ul>
+<li>PostgreSQL 15に対応</li>
+</ul>
+</p>
+
+<p>
+<h4>3.1.19</h4>
+<ul>
+<li>PostgreSQL 14に対応</li>
+</ul>
+</p>
+
+<p>
+<h4>3.1.18</h4>
+<ul>
+<li>バージョン3.1.17で残されていた"-o TYPE=FUNCTION" オプション使用時の問題について、当該オプション使用する際の注意点をドキュメントに追記しました</li>
+<li>Ubuntu環境において、ビルドが失敗する問題を修正しました</li>
+</ul>
+</p>
+
+<p>
 <h4>3.1.17</h4>
+<ul>
+<li>PostgreSQL 13に対応</li>
+<li>Bツリーインデックスに対してマージする場合、エラーが発生した問題を解決しました</li>
+</ul>
+</p>
+
+<p>
+<h4>3.1.16</h4>
 <ul>
 <li>PostgreSQL 12に対応</li>
 <li>pg_bulkloadのPARALLELやMULTI_PROCESS機能を有効化して使用する場合、いくつかの注意点をドキュメントに追加しました</li>
@@ -909,7 +965,7 @@ pg_bulkload-VERSIONX_X_X-X.pgXX.rhelX.rpmからpg_bulkload-X.X.XX-X.pgXX.rhelX.r
   <a href="index_ja.html">Top</a> &gt;
   <a href="pg_bulkload-ja.html">pg_bulkload</a>
 <div>
-<p class="footer">Copyright (c) 2007-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION</p>
+<p class="footer">Copyright (c) 2007-2024, NIPPON TELEGRAPH AND TELEPHONE CORPORATION</p>
 
 <script type="text/javascript">
 var gaJsHost = (("https:" == document.location.protocol) ? "https://ssl." : "http://www.");
